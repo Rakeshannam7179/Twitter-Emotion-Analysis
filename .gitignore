@@ -14,3 +14,12 @@ trained_emotion_model/
 backend.log
 test_log.txt
 Untitled.ipynb
+
+backend/image_emotion_model/DATASET/
+node_modules/
+frontend/node_modules/
+
+*.pt
+*.safetensors
+backend/models/fine_tuned_emotion/
+*.bin

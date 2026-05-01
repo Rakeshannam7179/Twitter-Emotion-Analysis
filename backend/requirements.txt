@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+snscrape
+pandas
+numpy
+torch
+transformers
+opencv-python
+Pillow
+deepface
+requests
+python-multipart
+datasets
+accelerate
+scikit-learn
+torchvision
+matplotlib
