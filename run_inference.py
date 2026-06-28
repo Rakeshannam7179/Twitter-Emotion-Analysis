@@ -7,7 +7,7 @@ try:
     print(f"Loading model from {model_path}...")
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = AutoModelForSequenceClassification.from_pretrained(model_path).to("cuda" if torch.cuda.is_available() else "cpu")
-    labels = ['anger', 'joy', 'optimism', 'sadness']
+    labels = ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
 except Exception as e:
     print(f"Error loading model: {e}")
     exit(1)

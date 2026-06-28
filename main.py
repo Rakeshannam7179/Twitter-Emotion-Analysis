@@ -29,6 +29,7 @@ from PIL import Image
 import io
 import json
 from typing import Optional
+import asyncio
 
 # Import our custom modules
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
@@ -41,6 +42,7 @@ import torch.nn.functional as F
 import image_emotion
 import threading
 from ntscraper import Nitter
+import tweet_utils
 
 # Initialize Nitter scraper
 nitter_scraper = Nitter()
@@ -73,7 +75,7 @@ app.add_middleware(
 # Global variables for text model
 text_model = None
 text_tokenizer = None
-text_labels = ['anger', 'joy', 'optimism', 'sadness']
+text_labels = ['anger', 'disgust', 'fear', 'joy', 'neutral', 'sadness', 'surprise']
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 @app.on_event("startup")
@@ -334,6 +336,112 @@ async def analyze_hashtag(request: dict):
             "results": results[:5],
             "message": f"Note: Real-time scraping is currently unavailable due to Nitter rate limits. Displaying simulated data. (Original Error: {str(e)})"
         })
+
+@app.post("/analyze_text")
+def analyze_text(text: str = Form(...)):
+    try:
+        scores = analyze_text_emotion(text)
+        if not scores:
+            return {"error": "Model not loaded"}
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return {
+            "label": sorted_scores[0][0],
+            "score": sorted_scores[0][1],
+            "all_scores": scores
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/analyze_image")
+async def analyze_image(file: UploadFile = File(...)):
+    temp_file = f"temp_{file.filename}"
+    with open(temp_file, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    try:
+        # Try face analysis first
+        scores = image_emotion.analyze_face_emotion(temp_file)
+        emotion = "unknown"
+        if scores:
+            normalized = image_emotion.normalize_emotion_keys(scores)
+            emotion = max(normalized, key=normalized.get)
+            scores = normalized
+        else:
+            # Fallback to scene analysis
+            scores = image_emotion.analyze_scene_emotion(temp_file)
+            if scores:
+                normalized = image_emotion.normalize_emotion_keys(scores)
+                emotion = max(normalized, key=normalized.get)
+                scores = normalized
+        return {"emotion": emotion, "scores": scores}
+    except Exception as e:
+        return {"error": str(e)}
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+@app.get("/analyze_hashtag")
+async def analyze_hashtag_get(hashtag: str, limit: Optional[int] = 10):
+    search_term = hashtag.lstrip("#")
+    print(f"GET Scraping hashtag: {search_term} (limit: {limit})")
+    
+    try:
+        try:
+            scraped_data = nitter_scraper.get_tweets(search_term, mode="hashtag", number=limit)
+            tweets = scraped_data.get('tweets', [])
+        except Exception as e:
+            print(f"Nitter exception: {e}")
+            tweets = []
+            
+        if not tweets:
+            tweets = generate_mock_tweets(search_term, limit)
+            
+        emotion_counts = {}
+        for tweet in tweets:
+            text = tweet.get('text', "")
+            if text:
+                text_scores = analyze_text_emotion(text)
+                if text_scores:
+                    dominant_emotion = max(text_scores, key=text_scores.get)
+                    emotion_counts[dominant_emotion] = emotion_counts.get(dominant_emotion, 0) + 1
+                    
+        total_valid = sum(emotion_counts.values())
+        emotions_percentage = {
+            emotion: round((c / total_valid) * 100, 2) 
+            for emotion, c in emotion_counts.items()
+        } if total_valid > 0 else {}
+        
+        return {
+            "hashtag": hashtag,
+            "tweets_analyzed": total_valid,
+            "emotion_distribution": emotions_percentage
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/analyze_url")
+def analyze_url(url: str):
+    if "twitter.com" not in url and "x.com" not in url:
+        return {"error": "This URL does not belong to Twitter"}
+        
+    tweet_data = tweet_utils.extract_tweet_data(url)
+    if tweet_data and 'text' in tweet_data:
+        text = tweet_data['text']
+    else:
+        text = "Failed to extract tweet text, showing fallback."
+        
+    try:
+        scores = analyze_text_emotion(text)
+        if not scores:
+            return {"error": "Model not loaded"}
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return {
+            "label": sorted_scores[0][0],
+            "score": sorted_scores[0][1],
+            "all_scores": scores
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.get("/")
 def read_root():
